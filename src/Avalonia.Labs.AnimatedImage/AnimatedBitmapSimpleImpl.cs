@@ -1,13 +1,14 @@
 using System;
 using System.Collections.Generic;
-using System.Diagnostics.CodeAnalysis;
+using System.Threading;
 using Avalonia.Media.Imaging;
 
 namespace Avalonia.Labs.AnimatedImage;
 
-internal class AnimatedBitmapSimpleImpl : IAnimatedBitmap
+internal class AnimatedBitmapSimpleImpl : AnimatedBitmapBase
 {
     public AnimatedBitmapSimpleImpl(IReadOnlyCollection<Bitmap> bitmaps, IReadOnlyCollection<int> delays)
+        : base(true)
     {
         ArgumentNullException.ThrowIfNull(bitmaps);
         ArgumentNullException.ThrowIfNull(delays);
@@ -21,37 +22,21 @@ internal class AnimatedBitmapSimpleImpl : IAnimatedBitmap
         FrameCount = bitmapCount;
     }
 
-    public bool IsInitialized { get; set; } = true;
+    public override Size Size { get; }
 
-    public bool IsFailed => false;
+    public override int FrameCount { get; }
 
-    public bool IsCancellable { get; set; }
+    public override IReadOnlyList<Bitmap> Frames { get; }
 
-    public Size Size { get; }
+    public override IReadOnlyList<int> Delays { get; }
 
-    public int FrameCount { get; }
-
-    [field: MaybeNull, AllowNull]
-    public IReadOnlyList<Bitmap> Frames { get; }
-
-    public IReadOnlyList<int> Delays { get; }
-
-    public event EventHandler? Initialized;
-
-    public event EventHandler<AnimatedBitmapFailedEventArgs>? Failed;
-
-    public void Dispose()
+    protected override void InitCore(CancellationToken cancellationToken)
     {
-        var initialized = IsInitialized;
-        IsInitialized = false;
-        GC.SuppressFinalize(this);
-
-        if (initialized)
-            foreach (var bitmap in Frames)
-                bitmap.Dispose();
     }
 
-    public void Init()
+    protected override void DisposeCore()
     {
+        foreach (var bitmap in Frames)
+            bitmap.Dispose();
     }
 }
