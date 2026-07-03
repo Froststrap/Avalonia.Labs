@@ -14,6 +14,8 @@ internal static unsafe partial class Libobjc
 #if NET7_0_OR_GREATER
     [LibraryImport(libobjc)]
     public static partial IntPtr _Block_copy(BlockLiteral* block);
+    [LibraryImport(libobjc)]
+    public static partial void _Block_release(IntPtr block);
 
     [LibraryImport(libSystem, StringMarshalling = StringMarshalling.Utf8)]
     public static partial IntPtr dlsym(IntPtr handle, string symbol);
@@ -54,6 +56,8 @@ internal static unsafe partial class Libobjc
 #else
     [DllImport(libobjc)]
     public static extern IntPtr _Block_copy(BlockLiteral* block);
+    [DllImport(libobjc)]
+    public static extern void _Block_release(IntPtr block);
 
     [DllImport(libSystem, CharSet = CharSet.Ansi)]
     public static extern IntPtr dlsym(IntPtr handle, string symbol);
@@ -84,7 +88,7 @@ internal static unsafe partial class Libobjc
     public static extern IntPtr object_setInstanceVariable(IntPtr basePtr, string variableName, IntPtr value);
 #endif
 
-    
+
     [DllImport(libobjc)]
     public static extern IntPtr objc_autoreleasePoolPush();
     [DllImport(libobjc)]

@@ -3,24 +3,27 @@ using System.Runtime.InteropServices;
 
 namespace AppleInterop;
 
-[StructLayout (LayoutKind.Sequential)]
+[StructLayout(LayoutKind.Sequential)]
 internal unsafe ref struct BlockDescriptor
 {
     public static IntPtr GlobalDescriptor { get; }
     static BlockDescriptor()
     {
-        GlobalDescriptor = Marshal.AllocHGlobal(sizeof(BlockDescriptor));
+        var byteSize = sizeof(BlockDescriptor);
+        GlobalDescriptor = Marshal.AllocHGlobal(byteSize);
+        new Span<byte>((void*)GlobalDescriptor, byteSize).Clear();
+
         var descriptor = (BlockDescriptor*)(void*)GlobalDescriptor;
         descriptor->size = sizeof(BlockLiteral);
     }
 
-    private long reserved; // always nil
-    private long size; // size of the entire Block_literal
+    private long reserved;
+    private long size;
     private delegate* unmanaged[Cdecl]<void*, void*, void> copy_helper;
     private delegate* unmanaged[Cdecl]<void*, void> dispose_helper;
 }
 
-[StructLayout (LayoutKind.Sequential)]
+[StructLayout(LayoutKind.Sequential)]
 internal ref struct BlockLiteral(IntPtr invoke)
 {
     static IntPtr block_class;
@@ -30,7 +33,7 @@ internal ref struct BlockLiteral(IntPtr invoke)
         {
             if (block_class == IntPtr.Zero)
             {
-                block_class = Libobjc.dlsym (Libobjc.LinkLibSystem(), "_NSConcreteStackBlock"); // _NSConcreteGlobalBlock
+                block_class = Libobjc.dlsym(Libobjc.LinkLibSystem(), "_NSConcreteStackBlock");
             }
             return block_class;
         }
@@ -74,10 +77,10 @@ internal ref struct BlockLiteral(IntPtr invoke)
         BLOCK_REFCOUNT_MASK = (0xffff),
         BLOCK_NEEDS_FREE = (1 << 24),
         BLOCK_HAS_COPY_DISPOSE = (1 << 25),
-        BLOCK_HAS_CTOR = (1 << 26), /* Helpers have C++ code. */
+        BLOCK_HAS_CTOR = (1 << 26),
         BLOCK_IS_GC = (1 << 27),
         BLOCK_IS_GLOBAL = (1 << 28),
-        BLOCK_HAS_DESCRIPTOR = (1 << 29), // This meaning was deprecated 
+        BLOCK_HAS_DESCRIPTOR = (1 << 29),
         BLOCK_HAS_STRET = (1 << 29),
         BLOCK_HAS_SIGNATURE = (1 << 30),
     }

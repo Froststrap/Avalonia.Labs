@@ -1,8 +1,10 @@
 #if !ANDROID
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
 using System.Runtime.Versioning;
+using System.Threading;
 using AppleInterop;
 using Avalonia.Threading;
 
@@ -14,7 +16,11 @@ internal class AppleNativeNotificationManager : INativeNotificationManagerImpl, 
 {
     private readonly string _identifier;
     private readonly UNUserNotificationCenterDelegate _notificationDelegate;
-    private readonly Dictionary<string, (INativeNotification, UNNotificationRequest)> _notifications = [];
+    private readonly ConcurrentDictionary<string, (INativeNotification, UNNotificationRequest)> _notifications = new();
+    private readonly ConcurrentDictionary<string, AppleNativeNotification> _pendingNotifications = new();
+    private readonly CancellationTokenSource _shutdownCts = new();
+    private volatile bool _isInitialized;
+    private bool _isDisposed;
 
     public AppleNativeNotificationManager(string identifier)
     {
@@ -25,6 +31,7 @@ internal class AppleNativeNotificationManager : INativeNotificationManagerImpl, 
 
     public AppleNotificationChannelManager ChannelManager { get; }
     public bool ClearOnClose { get; set; }
+    public bool IsInitialized => _isInitialized;
     NotificationChannelManager INativeNotificationManagerImpl.ChannelManager => ChannelManager;
 
     public IReadOnlyDictionary<uint, INativeNotification> ActiveNotifications =>
@@ -48,6 +55,7 @@ internal class AppleNativeNotificationManager : INativeNotificationManagerImpl, 
     public void CloseAll()
     {
         UNUserNotificationCenter.Current?.RemoveAllPending();
+        _pendingNotifications.Clear();
         _notifications.Clear();
     }
 
@@ -60,38 +68,75 @@ internal class AppleNativeNotificationManager : INativeNotificationManagerImpl, 
         current.Delegate = _notificationDelegate;
 
         current.SetNotificationCategories(ChannelManager.ToSet());
+
+        _isInitialized = true;
+        FlushPendingNotifications();
+    }
+
+    private void FlushPendingNotifications()
+    {
+        foreach (var identifier in _pendingNotifications.Keys)
+        {
+            if (_pendingNotifications.TryRemove(identifier, out var notification))
+                Show(notification);
+        }
     }
 
     private void NotificationDelegateOnDidReceiveNotificationResponse(object? sender, (string notificationId, string actionId, string? userText) e)
     {
-        if (!_notifications.TryGetValue(e.notificationId, out var notificationTuple))
-            return;
-
-        const string defaultActionId = "com.apple.UNNotificationDefaultActionIdentifier";
-        NotificationCompleted?.Invoke(this, new NativeNotificationCompletedEventArgs
+        Dispatcher.UIThread.Post(() =>
         {
-            NotificationId = notificationTuple.Item1.Id,
-            IsActivated = e.actionId == defaultActionId,
-            ActionTag = e.actionId == defaultActionId ? null : e.actionId,
-            UserData = e.userText
+            if (!_notifications.TryGetValue(e.notificationId, out var notificationTuple))
+                return;
+
+            const string defaultActionId = "com.apple.UNNotificationDefaultActionIdentifier";
+            NotificationCompleted?.Invoke(this, new NativeNotificationCompletedEventArgs
+            {
+                NotificationId = notificationTuple.Item1.Id,
+                IsActivated = e.actionId == defaultActionId,
+                ActionTag = e.actionId == defaultActionId ? null : e.actionId,
+                UserData = e.userText
+            });
         });
     }
 
     public void Dispose()
     {
+        if (_isDisposed)
+            return;
+        _isDisposed = true;
+        _shutdownCts.Cancel();
+
         if (ClearOnClose)
             CloseAll();
 
         _notificationDelegate.DidReceiveNotificationResponse -= NotificationDelegateOnDidReceiveNotificationResponse;
         UNUserNotificationCenter.Current.Delegate = null;
+
+        _shutdownCts.Dispose();
     }
 
     public async void Show(AppleNativeNotification appleNativeNotification)
     {
-        var current = UNUserNotificationCenter.Current;
-        var result = await current.RequestAlertAuthorization();
-        if (!result)
+        if (_isDisposed)
             return;
+
+        if (!_isInitialized)
+        {
+            _pendingNotifications[appleNativeNotification.AppleIdentifier] = appleNativeNotification;
+            return;
+        }
+
+        try
+        {
+            var result = await UNUserNotificationCenter.Current.RequestAlertAuthorization(_shutdownCts.Token);
+            if (!result)
+                return;
+        }
+        catch (OperationCanceledException)
+        {
+            return;
+        }
 
         var content = new UNMutableNotificationContent();
         content.Title = CFString.Create(appleNativeNotification.Title);
@@ -116,6 +161,7 @@ internal class AppleNativeNotificationManager : INativeNotificationManagerImpl, 
 
     public void Close(AppleNativeNotification appleNativeNotification)
     {
+        _pendingNotifications.TryRemove(appleNativeNotification.AppleIdentifier, out _);
         UNUserNotificationCenter.Current.RemovePending(appleNativeNotification.AppleIdentifier);
     }
 }

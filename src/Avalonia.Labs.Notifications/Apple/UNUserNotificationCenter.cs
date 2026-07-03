@@ -1,10 +1,9 @@
 using System;
-using System.Collections.Generic;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
+using System.Threading;
 using System.Threading.Tasks;
 using AppleInterop;
-using Avalonia.Threading;
 
 namespace Avalonia.Labs.Notifications.Apple;
 
@@ -26,7 +25,6 @@ internal class UNUserNotificationCenter : NSObject
 
     private UNUserNotificationCenter(IntPtr handle) : base(handle, false)
     {
-        
     }
 
     public void AddWithoutCompletion(UNNotificationRequest request)
@@ -66,36 +64,42 @@ internal class UNUserNotificationCenter : NSObject
         Libobjc.void_objc_msgSend(Handle, s_setNotificationCategories, _currentSet.Handle);
     }
 
-    public async Task<bool> RequestAlertAuthorization()
+    public async Task<bool> RequestAlertAuthorization(CancellationToken cancellationToken = default)
     {
         var tcs = new TaskCompletionSource<bool>();
-        var tcsHandle = GCHandle.Alloc(tcs);
+        var id = BlockStateManager.Add(tcs);
+        var block = IntPtr.Zero;
         try
         {
-            var options = 1 << 2; // UNAuthorizationOptionAlert
-            var block = BlockLiteral.GetBlockForFunctionPointer(s_requestAuthCallback, GCHandle.ToIntPtr(tcsHandle));
-            Libobjc.void_objc_msgSend(Handle, s_requestAuthorizationWithOptions, options, block);
+            using var reg = cancellationToken.Register(() => tcs.TrySetCanceled());
+            block = BlockLiteral.GetBlockForFunctionPointer(s_requestAuthCallback, new IntPtr(id));
+            Libobjc.void_objc_msgSend(Handle, s_requestAuthorizationWithOptions, 1 << 2, block);
             return await tcs.Task;
         }
         finally
         {
-            tcsHandle.Free();
+            BlockStateManager.Remove(id)?.TrySetCanceled();
+            if (block != IntPtr.Zero)
+                Libobjc._Block_release(block);
         }
     }
 
     public async Task Add(UNNotificationRequest request)
     {
         var tcs = new TaskCompletionSource<bool>();
-        var tcsHandle = GCHandle.Alloc(tcs);
+        var id = BlockStateManager.Add(tcs);
+        var block = IntPtr.Zero;
         try
         {
-            var block = BlockLiteral.GetBlockForFunctionPointer(new IntPtr(s_addCallback), GCHandle.ToIntPtr(tcsHandle));
+            block = BlockLiteral.GetBlockForFunctionPointer(s_addCallback, new IntPtr(id));
             Libobjc.void_objc_msgSend(Handle, s_addNotificationRequest, request.Handle, block);
             await tcs.Task;
         }
         finally
         {
-            tcsHandle.Free();
+            BlockStateManager.Remove(id)?.TrySetCanceled();
+            if (block != IntPtr.Zero)
+                Libobjc._Block_release(block);
         }
     }
 
@@ -111,46 +115,48 @@ internal class UNUserNotificationCenter : NSObject
         Libobjc.void_objc_msgSend(Handle, s_removeAllPendingNotificationRequests);
     }
 
-    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
+    [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })]
     private static void NotificationAddCallback(IntPtr thisBlock, IntPtr errorPtr)
     {
-        var tcsHandlePtr = BlockLiteral.TryGetBlockState(thisBlock);
-        if (tcsHandlePtr == IntPtr.Zero)
+        var idPtr = BlockLiteral.TryGetBlockState(thisBlock);
+        if (idPtr == IntPtr.Zero)
             return;
-        var tcs = GCHandle.FromIntPtr(tcsHandlePtr).Target as TaskCompletionSource<bool>;
+        var id = idPtr.ToInt64();
+        var tcs = BlockStateManager.Remove(id);
+        if (tcs == null)
+            return;
 
         if (errorPtr != IntPtr.Zero)
         {
             using var error = new NSError(errorPtr);
-            if (error.LocalizedDescription != null)
-            {
-                tcs?.TrySetException(new Exception(error.LocalizedDescription));
-                return;
-            }
+            tcs.TrySetException(new Exception(error.LocalizedDescription ?? "Unknown error"));
         }
-
-        tcs?.TrySetResult(true);
+        else
+        {
+            tcs.TrySetResult(true);
+        }
     }
 
-    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
+    [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })]
     private static void RequestAuthorizationCallback(IntPtr thisBlock, int granted, IntPtr errorPtr)
     {
-        var tcsHandlePtr = BlockLiteral.TryGetBlockState(thisBlock);
-        if (tcsHandlePtr == IntPtr.Zero)
+        var idPtr = BlockLiteral.TryGetBlockState(thisBlock);
+        if (idPtr == IntPtr.Zero)
             return;
-        var tcs = GCHandle.FromIntPtr(tcsHandlePtr).Target as TaskCompletionSource<bool>;
+        var id = idPtr.ToInt64();
+        var tcs = BlockStateManager.Remove(id);
+        if (tcs == null)
+            return;
 
         if (errorPtr != IntPtr.Zero)
         {
             using var error = new NSError(errorPtr);
-            if (error.LocalizedDescription != null)
-            {
-                tcs?.TrySetException(new Exception(error.LocalizedDescription));
-                return;
-            }
+            tcs.TrySetException(new Exception(error.LocalizedDescription ?? "Unknown error"));
         }
-
-        tcs?.TrySetResult(granted == 1);
+        else
+        {
+            tcs.TrySetResult(granted == 1);
+        }
     }
 
     protected override void Dispose(bool disposing)

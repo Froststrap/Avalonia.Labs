@@ -60,8 +60,15 @@ internal unsafe class UNUserNotificationCenterDelegate : NSObject
             null :
             GCHandle.FromIntPtr(managedHandle).Target as UNUserNotificationCenterDelegate;
 
-        var id = UNNotificationRequest.GetIdentifierFromUNNotification(presentNotification);
-        managedThis?.WillPresentNotification?.Invoke(managedThis, id);
+        try
+        {
+            var id = UNNotificationRequest.GetIdentifierFromUNNotification(presentNotification);
+            managedThis?.WillPresentNotification?.Invoke(managedThis, id);
+        }
+        catch (Exception)
+        {
+
+        }
 
         var callback = (delegate* unmanaged[Cdecl]<IntPtr, int, void>)BlockLiteral.GetCallback(completionHandler);
         var options = s_allowedNotificationOptions;
@@ -76,12 +83,19 @@ internal unsafe class UNUserNotificationCenterDelegate : NSObject
             null :
             GCHandle.FromIntPtr(managedHandle).Target as UNUserNotificationCenterDelegate;
 
-        var notificationId = UNNotificationRequest.GetIdentifierFromUNNotificationResponse(notificationResponse);
-        var actionId = UNNotificationRequest.GetActionIdentifierFromUNNotificationResponse(notificationResponse);
-        var response = actionId == "reply" ?
-            UNNotificationRequest.GetActionUserTextFromUNNotificationResponse(notificationResponse) :
-            null;
-        managedThis?.DidReceiveNotificationResponse?.Invoke(managedThis, (notificationId, actionId, response));
+        try
+        {
+            var notificationId = UNNotificationRequest.GetIdentifierFromUNNotificationResponse(notificationResponse);
+            var actionId = UNNotificationRequest.GetActionIdentifierFromUNNotificationResponse(notificationResponse);
+            var response = actionId == "reply" ?
+                UNNotificationRequest.GetActionUserTextFromUNNotificationResponse(notificationResponse) :
+                null;
+            managedThis?.DidReceiveNotificationResponse?.Invoke(managedThis, (notificationId, actionId, response));
+        }
+        catch (Exception)
+        {
+
+        }
 
         var callback = (delegate* unmanaged[Cdecl]<IntPtr, void>)BlockLiteral.GetCallback(completionHandler);
         callback(completionHandler);
