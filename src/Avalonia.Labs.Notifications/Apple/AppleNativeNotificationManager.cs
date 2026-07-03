@@ -102,7 +102,7 @@ internal class AppleNativeNotificationManager : INativeNotificationManagerImpl, 
             CFString.Create(appleNativeNotification.AppleIdentifier), content);
         _notifications[appleNativeNotification.AppleIdentifier] = (appleNativeNotification, request);
 
-        _ = UNUserNotificationCenter.Current.Add(request);
+        UNUserNotificationCenter.Current.AddWithoutCompletion(request);
 
         if (appleNativeNotification.Expiration is { } expiration)
         {

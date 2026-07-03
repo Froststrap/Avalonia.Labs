@@ -29,6 +29,11 @@ internal class UNUserNotificationCenter : NSObject
         
     }
 
+    public void AddWithoutCompletion(UNNotificationRequest request)
+    {
+        Libobjc.void_objc_msgSend(Handle, s_addNotificationRequest, request.Handle, IntPtr.Zero);
+    }
+
     private static UNUserNotificationCenter? s_currentSingleton;
     public static UNUserNotificationCenter Current
     {
